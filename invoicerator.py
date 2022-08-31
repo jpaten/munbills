@@ -1,84 +1,76 @@
+from __future__ import print_function
+
 import string
 import stripe
 import datetime
 import requests
+import json
 
-#Placeholders for Github
-stripe.api_key = "nope"
-CARD_FEE = "nope"
-DELEGATION_FEE = "nope"
-ONLINE_DEL_FEE = {"E": "nope", "R": "nope",
-                  "L": "nope"}
-IP_DEL_FEE = {"E": "nope", "R": "nope",
-              "L": "nope"}
-EIN = "nope"
-T1_COUPON = "nope"
+import os.path
+import base64
+from email.message import EmailMessage
 
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+with open("../stripe_keys_LIVE.json", "r") as f:
+    config_and_keys = json.load(f)
+stripe.api_key = config_and_keys["api_key"]
+CARD_FEE = config_and_keys["card_fee"]
+DELEGATION_FEE = config_and_keys["delegation_fee"]
+ONLINE_DEL_FEE = config_and_keys["online_fees"]
+IP_DEL_FEE = config_and_keys["ip_fees"]
+EIN = config_and_keys["EIN"]
+T1_COUPON = config_and_keys["T1_coupon"]
 
 DAYS_LEFT = 30
 REGISTRATION_START = datetime.datetime(2022, 6, 1)
 
-from_american = lambda date: datetime.datetime(int(date[2]), int(date[0]), int(date[1]))
+CARD_HTML = "../card_email.html"
+CHECK_HTML = "../check_email.html"
+EXTERNAL_EMAIL = config_and_keys["external_email"]
+FINANCE_EMAIL = config_and_keys["finance_email"]
+EMAIL_SUBJECT = "BruinMUN 2022 Invoice"
+MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November",
+          "December"]
+
+data_from_american = lambda date: datetime.datetime(int(date[2]), int(date[0]), int(date[1]))
 
 def main():
-    line = input()
-    lineList = line.split("\t")
-    print(lineList)
-    school = lineList[0]
-    t1 = True if lineList[1] == "1" else False
-    ind = True if lineList[2] == "1" else False
-    advName = lineList[3]
-    address = lineList[4]
-    email = lineList[5]
-    period = lineList[6]
-    regDate = lineList[7]
-    ipDels = int(lineList[8])
-    olDels = int(lineList[9])
-    card = True if lineList[13] == "Credit Card" else False
-    amountToInvoice = lineList[15]
-    deadline = lineList[17]
-    daysLeft = lineList[18]
 
+    # Parse input in form of a row copied from the Registration Sheet
+    line = input(f"Welcome to MUNBills, currently running in {config_and_keys['key_type']} mode! Please copy in a row from the reg sheet\n")
+    line_list = line.split("\t")
+    try:
+        school = line_list[0]
+        t1 = True if line_list[1] == "1" else False
+        ind = True if line_list[2] == "1" else False
+        adv_name = line_list[3]
+        address = line_list[4]
+        email = line_list[5]
+        period = line_list[6]
+        reg_date = line_list[7]
+        ip_dels = int(line_list[8])
+        ol_dels = int(line_list[9])
+        card = True if line_list[13] == "Credit Card" else False
+        amountToInvoice = line_list[15]
+        deadline = line_list[17]
+        daysLeft = line_list[18]
+    except IndexError:
+        print("Insufficient entries, did you copy from the right place?")
+        exit(1)
     # Create or retrieve Customer
     # First extract address
-    input(f"Address given as {address}, is this correct?")
-    address_fix = address.replace(", ", ",")
-    address_split = address_fix.split(",")
-    street_address = string.capwords(address_split[0])  # TODO: line 2
-    line_two = input("Enter address line two or press enter")
-    if line_two:
-        street_address = input("Enter address line one")
-    address_city = string.capwords(address_split[1])
-    address_rest = address_split[2].split()
-    print(address_rest)
-    address_state = string.capwords(address_rest[0])  # TODO: validation
-    try:
-        address_zip = int(address_rest[1].split("-")[0]) #TODO: addresses with dashes
-        address_country = " ".join(address_rest[2:])
-    except ValueError:
-        address_state = string.capwords(address_rest[0] + " " + address_rest[1])
-        address_zip = address_rest[2]
-        address_country = " ".join(address_rest[3:])
-    if address_country.lower() in ["us", "united states", "united states of america", "usa"]:
-        address_country = "US"
+    goodAddress = input(f"Address given as {address}, is this correct(Y/n)?\n")
+    if goodAddress == "Y":
+        cust_address = get_auto_address(address)
     else:
-        address_country = input("Country not detectable, enter 2 letter code")
-    if address_state.lower() in ["california", "ca"]:
-        address_state = "California"
-    else:
-        new_state = input(
-            F"Address state given as {address_state}. Enter new state(full) or press return to use entered state")
-        if new_state not in string.whitespace:
-            address_state = new_state
-    if line_two:
-        cust_address = {"city": address_city, "country": address_country, "state": address_state,
-                        "line1": street_address, "line2": line_two, "postal_code": address_zip}
-    else:
-        cust_address = {"city": address_city, "country": address_country, "state": address_state,
-                        "line1": street_address, "postal_code": address_zip}
+        cust_address = get_manual_address()
 
     # Check for existing customer
-    found_customers = stripe.Customer.search(query=f"name~ '{advName}' AND email: '{email}'")
+    found_customers = stripe.Customer.search(query=f"name~ '{adv_name}' AND email: '{email}'")
     if found_customers["data"]:
         if len(found_customers["data"]) > 1:
             for i in range(len(found_customers["data"])):
@@ -93,7 +85,7 @@ def main():
                       print("Input was not a number, try again")
                 except IndexError:
                     print("Not a valid customer, try again")
-            to_delete = input("Delete other customers? (Y/n)")
+            to_delete = input("Delete other customers? (Y/n)\n")
             if to_delete == "Y":
                 for i in range(len(found_customers["data"])):
                     if i != int(customer_number):
@@ -102,7 +94,6 @@ def main():
             customer = found_customers["data"][0]
         customer = stripe.Customer.modify(
             customer.id,
-            shipping={"address": {}, "name": {}, "phone": {}},
             address=cust_address,
             description=school)
 
@@ -110,16 +101,16 @@ def main():
         customer = stripe.Customer.create(
             description=school,
             email=email,
-            name=advName,
+            name=adv_name,
             address=cust_address
         )
 
     # Invoice is already paid, so get a receipt
     if daysLeft == "PAID":
         # Check it was actually paid
-        split_reg_date = regDate.split("/")
+        split_reg_date = reg_date.split("/")
         if len(split_reg_date) == 3:
-            datetime_reg_date = from_american(split_reg_date)
+            datetime_reg_date = data_from_american(split_reg_date)
         else:
             print("Date not formatted properly")
             exit(1)
@@ -161,7 +152,7 @@ def main():
             exit(0)
 
     # Delegation Fee
-    if ind and ipDels + olDels > 1:
+    if ind and ip_dels + ol_dels > 1:
         input("WARNING: multiple delegates registered to an independent delegation, press enter to confirm, or quit")
     elif not ind:
         stripe.InvoiceItem.create(
@@ -170,25 +161,28 @@ def main():
         )
 
     # Per delegate fees
-    if ipDels > 0:
+    if ip_dels > 0:
         stripe.InvoiceItem.create(
-            quantity=ipDels,
+            quantity=ip_dels,
             customer=customer,
             price=IP_DEL_FEE[period]  # TODO: add validation
         )
-    if olDels > 0:
+    if ol_dels > 0:
         stripe.InvoiceItem.create(
-            quantity=olDels,
+            quantity=ol_dels,
             customer=customer,
             price=ONLINE_DEL_FEE[period]  # TODO: Validation
         )
 
     # Set due date
     days_left = 30
+
     if deadline != "":
         deadline_split = deadline.split("/")
-        deadline_date = datetime.date(int(deadline_split[2]), int(deadline_split[0]), int(deadline_split[1]))
+        deadline_date = datetime.date(year=int(deadline_split[2])+2000, month=int(deadline_split[0]), day=int(deadline_split[1]))
         days_left = (deadline_date - datetime.date.today()).days
+    else:
+        deadline_date = datetime.date.today() + datetime.timedelta(days=30)
     invoice = stripe.Invoice.create(
         account_tax_ids=[EIN],
         auto_advance=False,
@@ -213,25 +207,172 @@ def main():
     input(f"Press enter to confirm address or quit:\n {invoice['customer_address']})")  # TODO: delete draft invoices
     if float(invoice["total"]) / 100 != float(amountToInvoice[1:].replace(",","")):
         input(
-            f"WARNING: Invoice for ${float(invoice['total']) / 100}, sheet calculated as ${amountToInvoice}, press enter to finalize or quit")
+            f"WARNING: Invoice for ${float(invoice['total']) / 100}, sheet calculated as {amountToInvoice}, press enter to finalize or quit")
     else:
         input(
-            f"Press enter to finalize invoice of {ipDels} IP dels & {olDels} OL dels for ${float(invoice['total']) / 100}")
+            f"Press enter to finalize invoice of {ip_dels} IP dels & {ol_dels} OL dels for ${float(invoice['total']) / 100}")
     invoice = stripe.Invoice.finalize_invoice(invoice, auto_advance=False)
-    print(invoice)
+    print(f"Invoice info:\n {invoice})")
 
     # Download invoice
-    r = requests.get(invoice.invoice_pdf)
-    with open(f"./GeneratedInvoices/{invoice['number']}.pdf", "wb") as file:
-        file.write(r.content)
-    print(f"link: {invoice.hosted_invoice_url}, ")
-    with open("./GeneratedInvoices/links.txt", "a") as file:
+    invoice_bytes = requests.get(invoice.invoice_pdf)
+    invoice_filename = f"../GeneratedInvoices/{invoice['number']}.pdf"
+    with open(invoice_filename, "wb") as file:
+        file.write(invoice_bytes.content)
+    print(f"Invoice link: {invoice.hosted_invoice_url}")
+    with open("../GeneratedInvoices/links.txt", "a") as file:
         file.write(f"{invoice.number} — {customer.description}: {invoice.hosted_invoice_url}\n")
 
-    lineList[14] = "$" + str(float(invoice["total"]) / 100)
+    line_list[14] = "$" + str(float(invoice["total"]) / 100)
     today = datetime.date.today()
-    lineList[11] = f"{today.month}/{today.day}/{today.year}"
-    print("\t".join(lineList[10:14]))  # TODO: this doesn't work for some reason?
+    line_list[11] = f"{today.month}/{today.day}/{today.year}"
+
+    # Emailing bit
+    email_start = input("Would you like to create a draft? (Y/n)\n")
+    if email_start != "Y":
+        print("Stopping")
+        exit(0)
+    else:
+        scopes = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose']
+        # Use old credentials or authorize new ones
+        # This bit was just copied from a tutorial :p
+        creds = None
+        # The file token.json stores the user's access and refresh tokens, and is
+        # created automatically when the authorization flow completes for the first
+        # time.
+        if os.path.exists('../token.json'):
+            creds = Credentials.from_authorized_user_file('../token.json', scopes)
+        # If there are no (valid) credentials available, let the user log in.
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    '../credentials.json', scopes, redirect_uri="https://bruinmun.org/")
+                creds = flow.run_local_server(port=8000)
+            # Save the credentials for the next run
+            with open('../token.json', 'w') as token:
+                token.write(creds.to_json())
+
+        # Create api client
+        service = build('gmail', 'v1', credentials=creds)
+
+        # Get email html
+        html_file = CARD_HTML if card else CHECK_HTML
+        with open(html_file, "r") as html_file:
+            html_base = html_file.read()
+        del_intro = "your delegation" if ind else "you"
+        on_campus = "on campus" if ol_dels == 0 else ""
+        registration_type = {"E": "Early Registration", "R": "Regular Registration", "L": "Late Registration"}[period]
+        date = f"{MONTHS[deadline_date.month-1]} {deadline_date.day}, {deadline_date.year}"
+        if card:
+            html_text = html_base.format(
+                link=invoice.hosted_invoice_url,
+                del_intro=del_intro,
+                on_campus=on_campus,
+                registration_type=registration_type,
+                date=date
+            )
+        else:
+            html_text = html_base.format(
+                del_intro=del_intro,
+                on_campus=on_campus,
+                registration_type=registration_type,
+                date=date
+            )
+        with open("../current_email.html", "w") as f:
+            f.write(html_text)
+        print("Email made, please check current_email.html")
+
+        # Get recipients
+        make_draft = input("Confirm draft (Y/n)\n")
+        recipients = [email]
+        if make_draft != "Y":
+            exit(0)
+        while True:
+            extra = input("Please enter any additional emails, or press enter to stop\n")
+            if extra:
+                recipients.append(extra)
+            else:
+                break
+
+        # Make email
+        message = EmailMessage()
+        message.add_alternative(html_text, subtype="html")
+        message["To"] = ", ".join(recipients)
+        message["cc"] = EXTERNAL_EMAIL
+        message["From"] = FINANCE_EMAIL
+        message["Subject"] = EMAIL_SUBJECT
+        with open(invoice_filename, "rb") as f:
+            message.add_attachment(f.read(), maintype="application", subtype="pdf", filename=f"Invoice-{invoice.number}.pdf")
+        encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        create_message = {
+            'raw': encoded_message
+        }
+
+        # Create draft!!
+        draft = service.users().drafts().create(userId="me",
+                                                body={"message": create_message}).execute()
+        print(F'Draft id: {draft["id"]}\nDraft message: {draft["message"]}')
+        print(message.get_content_type())
+
+
+def get_auto_address(address):
+    cust_address = {}
+    address_fix = address.replace(", ", ",")
+    address_split = address_fix.split(",")
+    try:
+        cust_address["line1"] = string.capwords(address_split[0])
+        line_two = input("If the address has a line 2 enter it now, otherwise press enter\n")
+        if line_two:
+            cust_address["line2"] = line_two
+            cust_address["line1"] = input("Please enter the address line 1\n")
+        cust_address["city"] = string.capwords(address_split[1])
+
+        address_rest = address_split[2].split()
+        cust_address["state"] = string.capwords(address_rest[0])  # TODO: validation
+        try:
+            cust_address["postal_code"] = int(address_rest[1].split("-")[0])
+            cust_address["country"] = " ".join(address_rest[2:])
+        except ValueError:
+            cust_address["state"] = string.capwords(address_rest[0] + " " + address_rest[1])
+            cust_address["postal_code"] = address_rest[2]
+            cust_address["country"] = " ".join(address_rest[3:])
+    except IndexError:
+        print("Address incomplete, please enter manually")
+        cust_address = get_manual_address()
+    except ValueError:
+        print("Bad address, please enter manually")
+        cust_address = get_manual_address()
+    if cust_address["country"].lower() in ["us", "united states", "united states of america", "usa", "america"]:
+        cust_address["country"] = "US"
+    else:
+        cust_address["country"] = input("Country not detectable, enter 2 letter code")
+    if cust_address["state"].lower() in ["california", "ca"]:
+        cust_address["state"] = "California"
+    else:
+        new_state = input(
+            F"Address state given as {cust_address['state']}. Enter new state(full) or press return to use entered state")
+        if new_state not in string.whitespace:
+            cust_address["state"] = new_state
+    return cust_address
+
+
+def get_manual_address():
+    cust_address = {}
+    address_done = False
+    while not address_done:
+        cust_address["line1"] = input("Enter Address Line 1\n")
+        cust_address["line2"] = input("Enter Address Line 2\n")
+        cust_address["city"] = input("Enter City\n")
+        cust_address["state"] = input("Enter state / province (complete)\n")
+        cust_address["country"] = input("Enter Country (2 letter code)\n")
+        cust_address["postal_code"] = input("Enter postcode\n")
+        print(cust_address)
+        address_check = input("Is this a good address(Y/n)?\n")
+        if address_check == "Y":
+            address_done = True
+    return cust_address
 
 
 if __name__ == '__main__':
