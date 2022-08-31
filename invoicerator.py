@@ -15,7 +15,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-with open("../stripe_keys_LIVE.json", "r") as f:
+with open("../stripe_keys_test.json", "r") as f:
     config_and_keys = json.load(f)
 stripe.api_key = config_and_keys["api_key"]
 CARD_FEE = config_and_keys["card_fee"]
@@ -25,41 +25,43 @@ IP_DEL_FEE = config_and_keys["ip_fees"]
 EIN = config_and_keys["EIN"]
 T1_COUPON = config_and_keys["T1_coupon"]
 
-DAYS_LEFT = 30
-REGISTRATION_START = datetime.datetime(2022, 6, 1)
+DAYS_LEFT = config_and_keys["default_time"]
+REGISTRATION_START = datetime.datetime(*config_and_keys["registration_start"])
 
-CARD_HTML = "../card_email.html"
-CHECK_HTML = "../check_email.html"
+CARD_HTML = config_and_keys["card_email"]
+CHECK_HTML = config_and_keys["check_email"]
 EXTERNAL_EMAIL = config_and_keys["external_email"]
 FINANCE_EMAIL = config_and_keys["finance_email"]
-EMAIL_SUBJECT = "BruinMUN 2022 Invoice"
+EMAIL_SUBJECT = config_and_keys["email_subject"]
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November",
           "December"]
 
-data_from_american = lambda date: datetime.datetime(int(date[2]), int(date[0]), int(date[1]))
+date_from_american = lambda date: datetime.datetime(int(date[2]), int(date[0]), int(date[1]))
+
 
 def main():
-
     # Parse input in form of a row copied from the Registration Sheet
-    line = input(f"Welcome to MUNBills, currently running in {config_and_keys['key_type']} mode! Please copy in a row from the reg sheet\n")
+    line = input(
+        f"Welcome to MUNBills, currently running in {config_and_keys['key_type']} mode! Please copy in a row from the reg sheet\n")
     line_list = line.split("\t")
-    try:
-        school = line_list[0]
-        t1 = True if line_list[1] == "1" else False
-        ind = True if line_list[2] == "1" else False
-        adv_name = line_list[3]
-        address = line_list[4]
-        email = line_list[5]
-        period = line_list[6]
-        reg_date = line_list[7]
-        ip_dels = int(line_list[8])
-        ol_dels = int(line_list[9])
-        card = True if line_list[13] == "Credit Card" else False
-        amountToInvoice = line_list[15]
-        deadline = line_list[17]
-        daysLeft = line_list[18]
+    input_keys = config_and_keys["input"]
+    try: #TODO: add validation
+        school = line_list[input_keys["delegation_name"]]
+        t1 = True if line_list[input_keys["discount"]] == "1" else False if line_list[input_keys["discount"]] == "0" else exit(0)
+        ind = True if line_list[input_keys["no_delegation_fee"]] == "1" else False
+        adv_name = line_list[input_keys["head_del_name"]]
+        address = line_list[input_keys["billing_address"]]
+        email = line_list[input_keys["email"]]
+        period = line_list[input_keys["registration_period"]]
+        reg_date = line_list[input_keys["registration_date"]]
+        ip_dels = int(line_list[input_keys["in_person_delegate_count"]])
+        ol_dels = int(line_list[input_keys["online_delegate_count"]])
+        card = True if line_list[input_keys["card"]] == "Credit Card" else False
+        amountToInvoice = line_list[input_keys["expected_cost"]]
+        deadline = line_list[input_keys["deadline"]]
+        daysLeft = line_list[input_keys["days_left"]]
     except IndexError:
-        print("Insufficient entries, did you copy from the right place?")
+        print("Bad entry, did you copy from the right place?")
         exit(1)
     # Create or retrieve Customer
     # First extract address
@@ -75,14 +77,15 @@ def main():
         if len(found_customers["data"]) > 1:
             for i in range(len(found_customers["data"])):
                 made_date = datetime.date.fromtimestamp(found_customers["data"][i].created)
-                print(f"Customer {i}, generated on {made_date.year}-{made_date.month}-{made_date.day}:\n {found_customers['data'][i]}")
+                print(
+                    f"Customer {i}, generated on {made_date.year}-{made_date.month}-{made_date.day}:\n {found_customers['data'][i]}")
             while True:
                 customer_number = input("Many customers found, please type the number of the customer to use")
                 try:
                     customer = found_customers["data"][int(customer_number)]
                     break
                 except ValueError:
-                      print("Input was not a number, try again")
+                    print("Input was not a number, try again")
                 except IndexError:
                     print("Not a valid customer, try again")
             to_delete = input("Delete other customers? (Y/n)\n")
@@ -110,11 +113,12 @@ def main():
         # Check it was actually paid
         split_reg_date = reg_date.split("/")
         if len(split_reg_date) == 3:
-            datetime_reg_date = data_from_american(split_reg_date)
+            datetime_reg_date = date_from_american(split_reg_date)
         else:
             print("Date not formatted properly")
             exit(1)
-        paid_charges = stripe.Charge.search(query=f"customer: '{customer.id}' AND status: 'succeeded' AND created > '{int(datetime_reg_date.timestamp())}'") #TODO: This doesn't work
+        paid_charges = stripe.Charge.search(
+            query=f"customer: '{customer.id}' AND status: 'succeeded' AND created > '{int(datetime_reg_date.timestamp())}'")  # TODO: This doesn't work
         if not paid_charges["data"]:
             print(f"Invoice marked as paid, but no paid invoices exist from this cycle. Customer ID is '{customer.id}")
             exit(2)
@@ -130,7 +134,8 @@ def main():
                 print(f"Invoice {invoice.number} marked as paid, receipt url: {receipt}")
         exit(0)
     # Check if customer has outstanding invoices
-    open_customer_payments = stripe.PaymentIntent.search(query=f"customer: '{customer.id}' AND status: 'requires_payment_method'", limit=99)
+    open_customer_payments = stripe.PaymentIntent.search(
+        query=f"customer: '{customer.id}' AND status: 'requires_payment_method'", limit=99)
     print(f"Customer has {len(open_customer_payments['data'])} open payments")
     if len(open_customer_payments["data"]) == 1:
         while True:
@@ -146,8 +151,8 @@ def main():
         if decision in ["V", "Q"]:
             exit(0)
     elif len(open_customer_payments["data"]) > 1:
-        decision = input(f"""Customer has at least {len(open_customer_payments['data'])} invoices. This might be bad! Please select an option:
-        (C)ontinue as usual, creating another invoice or (Q)uit and review invoices on Stripe""")
+        decision = input(
+            "Customer has at least {len(open_customer_payments['data'])} invoices. This might be bad! Please select an option:\n(C)ontinue as usual, creating another invoice or (Q)uit and review invoices on Stripe")
         if decision == "Q":
             exit(0)
 
@@ -176,10 +181,13 @@ def main():
 
     # Set due date
     days_left = 30
-
     if deadline != "":
         deadline_split = deadline.split("/")
-        deadline_date = datetime.date(year=int(deadline_split[2])+2000, month=int(deadline_split[0]), day=int(deadline_split[1]))
+        # Will break in y3k :p
+        given_year = int(deadline_split[2])
+        real_year = 2000 + given_year if given_year < 1000 else given_year
+        deadline_date = datetime.date(year=real_year, month=int(deadline_split[0]),
+                                      day=int(deadline_split[1]))
         days_left = (deadline_date - datetime.date.today()).days
     else:
         deadline_date = datetime.date.today() + datetime.timedelta(days=30)
@@ -205,7 +213,7 @@ def main():
 
     # Finalize invoice
     input(f"Press enter to confirm address or quit:\n {invoice['customer_address']})")  # TODO: delete draft invoices
-    if float(invoice["total"]) / 100 != float(amountToInvoice[1:].replace(",","")):
+    if float(invoice["total"]) / 100 != float(amountToInvoice[1:].replace(",", "")):
         input(
             f"WARNING: Invoice for ${float(invoice['total']) / 100}, sheet calculated as {amountToInvoice}, press enter to finalize or quit")
     else:
@@ -216,11 +224,11 @@ def main():
 
     # Download invoice
     invoice_bytes = requests.get(invoice.invoice_pdf)
-    invoice_filename = f"../GeneratedInvoices/{invoice['number']}.pdf"
+    invoice_filename = f"GeneratedInvoices/{invoice['number']}.pdf"
     with open(invoice_filename, "wb") as file:
         file.write(invoice_bytes.content)
     print(f"Invoice link: {invoice.hosted_invoice_url}")
-    with open("../GeneratedInvoices/links.txt", "a") as file:
+    with open("GeneratedInvoices/links.txt", "a") as file:
         file.write(f"{invoice.number} — {customer.description}: {invoice.hosted_invoice_url}\n")
 
     line_list[14] = "$" + str(float(invoice["total"]) / 100)
@@ -264,7 +272,7 @@ def main():
         del_intro = "your delegation" if ind else "you"
         on_campus = "on campus" if ol_dels == 0 else ""
         registration_type = {"E": "Early Registration", "R": "Regular Registration", "L": "Late Registration"}[period]
-        date = f"{MONTHS[deadline_date.month-1]} {deadline_date.day}, {deadline_date.year}"
+        date = f"{MONTHS[deadline_date.month - 1]} {deadline_date.day}, {deadline_date.year}"
         if card:
             html_text = html_base.format(
                 link=invoice.hosted_invoice_url,
@@ -304,7 +312,8 @@ def main():
         message["From"] = FINANCE_EMAIL
         message["Subject"] = EMAIL_SUBJECT
         with open(invoice_filename, "rb") as f:
-            message.add_attachment(f.read(), maintype="application", subtype="pdf", filename=f"Invoice-{invoice.number}.pdf")
+            message.add_attachment(f.read(), maintype="application", subtype="pdf",
+                                   filename=f"Invoice-{invoice.number}.pdf")
         encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
         create_message = {
             'raw': encoded_message
