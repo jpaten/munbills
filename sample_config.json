@@ -1,0 +1,43 @@
+{
+  "key_type": "SAMPLE",
+  "api_key": "",
+  "card_fee": "",
+  "delegation_fee": "",
+  "online_fees": {
+    "E": "",
+    "R": "",
+    "L": ""
+  },
+  "ip_fees": {
+    "E": "",
+    "R": "",
+    "L": ""
+  },
+  "EIN": ,
+  "T1_coupon": ,
+  "finance_email": ,
+  "external_email": ,
+  "check_email": ,
+  "card_email": ,
+  "email_subject":  ,
+  "registration_start": [YYYY,MM,DD],
+  "default_time": ,
+  "input": {
+    "delegation_name": ,
+    "discount": ,
+    "no_delegation_fee": ,
+    "head_del_name": ,
+    "billing_address": ,
+    "email": ,
+    "phone": ,
+    "registration_period": ,
+    "registration_date": ,
+    "in_person_delegate_count": ,
+    "online_delegate_count": ,
+    "card": ,
+    "expected_cost": ,
+    "deadline": ,
+    "days_left":
+  }
+}
+

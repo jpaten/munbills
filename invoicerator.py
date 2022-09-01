@@ -215,12 +215,13 @@ def main():
                                         payment_settings={"payment_method_types": ["card"]},
                                         description="BruinMUN 2022 Registration.",
                                         footer="Online payments are subject to an additional 3% payment processing fee. If you wish to pay by check, please let us know and we will issue a new invoice.")
+        if CARD_FEE != "":
+            stripe.Invoice.modify(invoice.id, default_tax_rates=[CARD_FEE])
     else:
         invoice = stripe.Invoice.modify(invoice.id,
                                         footer="Online payments are subject to an additional 3% payment processing fee. If you wish to pay online, please let us know and we will issue a new invoice.")
     if t1:
         invoice = stripe.Invoice.modify(invoice.id, discounts=[{"coupon": T1_COUPON}])
-
     # Finalize invoice
     input(f"Press enter to confirm address or quit:\n {invoice['customer_address']})")  # TODO: delete draft invoices
     if float(invoice["total"]) / 100 != float(amountToInvoice[1:].replace(",", "")):
@@ -318,7 +319,8 @@ def main():
         message = EmailMessage()
         message.add_alternative(html_text, subtype="html")
         message["To"] = ", ".join(recipients)
-        message["cc"] = EXTERNAL_EMAIL
+        if EXTERNAL_EMAIL:
+            message["cc"] = EXTERNAL_EMAIL
         message["From"] = FINANCE_EMAIL
         message["Subject"] = EMAIL_SUBJECT
         with open(invoice_filename, "rb") as f:

@@ -1,0 +1,5 @@
+*.jpg
+*.pdf
+*.json
+!sample_config.json
+GeneratedInvoices/*
