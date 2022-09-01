@@ -15,7 +15,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-CONFIG_FILE = "../stripe_keys_test.json"
+CONFIG_FILE = "../"
 
 with open(CONFIG_FILE, "r") as f:
     config_and_keys = json.load(f)
