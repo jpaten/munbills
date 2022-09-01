@@ -15,8 +15,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-with open("../stripe_keys_test.json", "r") as f:
+CONFIG_FILE = "../stripe_keys_test.json"
+
+with open(CONFIG_FILE, "r") as f:
     config_and_keys = json.load(f)
+
 stripe.api_key = config_and_keys["api_key"]
 CARD_FEE = config_and_keys["card_fee"]
 DELEGATION_FEE = config_and_keys["delegation_fee"]
@@ -46,20 +49,27 @@ def main():
     line_list = line.split("\t")
     input_keys = config_and_keys["input"]
     try: #TODO: add validation
-        school = line_list[input_keys["delegation_name"]]
-        t1 = True if line_list[input_keys["discount"]] == "1" else False if line_list[input_keys["discount"]] == "0" else exit(0)
-        ind = True if line_list[input_keys["no_delegation_fee"]] == "1" else False
-        adv_name = line_list[input_keys["head_del_name"]]
-        address = line_list[input_keys["billing_address"]]
-        email = line_list[input_keys["email"]]
-        period = line_list[input_keys["registration_period"]]
-        reg_date = line_list[input_keys["registration_date"]]
-        ip_dels = int(line_list[input_keys["in_person_delegate_count"]])
-        ol_dels = int(line_list[input_keys["online_delegate_count"]])
-        card = True if line_list[input_keys["card"]] == "Credit Card" else False
-        amountToInvoice = line_list[input_keys["expected_cost"]]
-        deadline = line_list[input_keys["deadline"]]
-        daysLeft = line_list[input_keys["days_left"]]
+        school = get_text_from_sheet(line_list,"delegation_name")
+        t1 = get_binary_from_sheet(line_list, "discount", required=False, default=False)
+        ind = get_binary_from_sheet(line_list, "no_delegation_fee", required=False, default=False)
+        adv_name = get_text_from_sheet(line_list, "head_del_name")
+        address = get_text_from_sheet(line_list, "billing_address")
+        email = get_text_from_sheet(line_list, "email")
+        phone = get_text_from_sheet(line_list, "phone", required=False)
+        period = get_text_from_sheet(line_list, "registration_period")
+        reg_date = get_text_from_sheet(line_list, "registration_date")
+        ip_dels = get_int_from_sheet(line_list, "in_person_delegate_count", required=False)
+        ol_dels = get_int_from_sheet(line_list, "online_delegate_count", required=False)
+        if ip_dels + ol_dels <= 0:
+            print("No delegates seem to be registered!")
+            exit(1)
+        card = get_binary_from_sheet(line_list, "card", options=["Credit Card", "Check"])
+        amountToInvoice = get_text_from_sheet(line_list, "expected_cost")
+        deadline = get_text_from_sheet(line_list, "deadline", required=False)
+        daysLeft = get_text_from_sheet(line_list, "days_left", required=False, default=str(DAYS_LEFT))
+        if daysLeft != "PAID" and int(daysLeft) < 0:
+            print("Invoice due in the past! Please correct!")
+            exit(1)
     except IndexError:
         print("Bad entry, did you copy from the right place?")
         exit(1)
@@ -158,7 +168,7 @@ def main():
 
     # Delegation Fee
     if ind and ip_dels + ol_dels > 1:
-        input("WARNING: multiple delegates registered to an independent delegation, press enter to confirm, or quit")
+        input("WARNING: multiple delegates registered to a no delegation fee delegation, press enter to confirm, or quit")
     elif not ind:
         stripe.InvoiceItem.create(
             customer=customer,
@@ -382,6 +392,36 @@ def get_manual_address():
         if address_check == "Y":
             address_done = True
     return cust_address
+
+
+def get_text_from_sheet(line_list, key, source=config_and_keys["input"], required=True, default=""):
+    if len(line_list) > source[key] > -1 and line_list[source[key]] != "":
+        return line_list[source[key]]
+    elif not required:
+        return default
+    else:
+        print(f"Value {key} not found in input")
+        exit(1)
+
+
+def get_int_from_sheet(line_list, key, source=config_and_keys["input"], required=True, default=-1):
+    if len(line_list) > source[key] > -1 and line_list[source[key]].isnumeric():
+        return int(line_list[source[key]])
+    elif not required:
+        return default
+    else:
+        print(f"Value {key} not found in input")
+        exit(1)
+
+
+def get_binary_from_sheet(line_list, key, options=("1", "0"), source=config_and_keys["input"], required=True, default=False):
+    if len(line_list) > source[key] > -1 and line_list[source[key]] in options:
+        return True if line_list[source[key]] == options[0] else False
+    elif not required:
+        return default
+    else:
+        print(f"Value {key} not found in input")
+        exit(1)
 
 
 if __name__ == '__main__':
