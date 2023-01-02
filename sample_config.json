@@ -17,8 +17,6 @@
   "T1_coupon": ,
   "finance_email": ,
   "external_email": ,
-  "check_email": ,
-  "card_email": ,
   "email_subject":  ,
   "registration_start": [YYYY,MM,DD],
   "default_time": ,
@@ -37,7 +35,32 @@
     "card": ,
     "expected_cost": ,
     "deadline": ,
-    "days_left":
+    "days_left":,
+    "payment_methods": {
+      "check": {
+        "description": [
+          "Line 1",
+          "Line 2(can be blank)",
+          "Line 3"
+        ],
+        "method": "none",
+        "email": "../LAMUN_checkEarly.html"
+      },
+      "credit card": {
+        "description": ["Line 1"],
+        "method": "card",
+        "email": ""
+      },
+      "zelle": {
+        "description": [
+          "Line 1",
+          "Line 2(can be blank)",
+          "Line 3"
+        ],
+        "method": "none",
+        "email": ""
+      }
+    }
   }
 }
 

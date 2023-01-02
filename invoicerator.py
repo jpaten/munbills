@@ -15,7 +15,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-CONFIG_FILE = "../"
+CONFIG_FILE = ""
 
 with open(CONFIG_FILE, "r") as f:
     config_and_keys = json.load(f)
@@ -28,11 +28,11 @@ IP_DEL_FEE = config_and_keys["ip_fees"]
 EIN = config_and_keys["EIN"]
 T1_COUPON = config_and_keys["T1_coupon"]
 
+PAYMENT_METHOD_INFO = config_and_keys["payment_methods"]
+
 DAYS_LEFT = config_and_keys["default_time"]
 REGISTRATION_START = datetime.datetime(*config_and_keys["registration_start"])
 
-CARD_HTML = config_and_keys["card_email"]
-CHECK_HTML = config_and_keys["check_email"]
 EXTERNAL_EMAIL = config_and_keys["external_email"]
 FINANCE_EMAIL = config_and_keys["finance_email"]
 EMAIL_SUBJECT = config_and_keys["email_subject"]
@@ -47,7 +47,6 @@ def main():
     line = input(
         f"Welcome to MUNBills, currently running in {config_and_keys['key_type']} mode! Please copy in a row from the reg sheet\n")
     line_list = line.split("\t")
-    input_keys = config_and_keys["input"]
     try: #TODO: add validation
         school = get_text_from_sheet(line_list,"delegation_name")
         t1 = get_binary_from_sheet(line_list, "discount", required=False, default=False)
@@ -60,13 +59,22 @@ def main():
         reg_date = get_text_from_sheet(line_list, "registration_date")
         ip_dels = get_int_from_sheet(line_list, "in_person_delegate_count", required=False)
         ol_dels = get_int_from_sheet(line_list, "online_delegate_count", required=False)
-        if ip_dels + ol_dels <= 0:
+        if ip_dels + ol_dels <= 0 and not (ol_dels < 0 and ip_dels > 0):
             print("No delegates seem to be registered!")
             exit(1)
-        card = get_binary_from_sheet(line_list, "card", options=["Credit Card", "Check"])
+
+        try:
+            currentPaymentMethodInfo = PAYMENT_METHOD_INFO[get_text_from_sheet(line_list, "card").lower()
+        except:
+            print("Invalid payment method")
+            exit(1)
+        card = (currentPaymentMethodInfo["method"] == "card")
         amountToInvoice = get_text_from_sheet(line_list, "expected_cost")
         deadline = get_text_from_sheet(line_list, "deadline", required=False)
         daysLeft = get_text_from_sheet(line_list, "days_left", required=False, default=str(DAYS_LEFT))
+
+        invoice_description = "\n".join(currentPaymentMethodInfo["description"])
+
         if daysLeft != "PAID" and int(daysLeft) < 0:
             print("Invoice due in the past! Please correct!")
             exit(1)
@@ -114,6 +122,7 @@ def main():
         customer = stripe.Customer.create(
             description=school,
             email=email,
+            phone=phone,
             name=adv_name,
             address=cust_address
         )
@@ -207,13 +216,13 @@ def main():
         collection_method="send_invoice",
         customer=customer,
         days_until_due=days_left,
+        description=invoice_description,
         payment_settings={"payment_method_types": ["ach_debit"]}
     )
     if card:
         invoice = stripe.Invoice.modify(invoice.id,
                                         default_tax_rates=[CARD_FEE],
                                         payment_settings={"payment_method_types": ["card"]},
-                                        description="BruinMUN 2022 Registration.",
                                         footer="Online payments are subject to an additional 3% payment processing fee. If you wish to pay by check, please let us know and we will issue a new invoice.")
         if CARD_FEE != "":
             stripe.Invoice.modify(invoice.id, default_tax_rates=[CARD_FEE])
@@ -277,7 +286,7 @@ def main():
         service = build('gmail', 'v1', credentials=creds)
 
         # Get email html
-        html_file = CARD_HTML if card else CHECK_HTML
+        html_file = currentPaymentMethodInfo["email"]
         with open(html_file, "r") as html_file:
             html_base = html_file.read()
         del_intro = "your delegation" if ind else "you"
@@ -344,13 +353,10 @@ def get_auto_address(address):
     address_split = address_fix.split(",")
     try:
         cust_address["line1"] = string.capwords(address_split[0])
-        line_two = input("If the address has a line 2 enter it now, otherwise press enter\n")
-        if line_two:
-            cust_address["line2"] = line_two
-            cust_address["line1"] = input("Please enter the address line 1\n")
-        cust_address["city"] = string.capwords(address_split[1])
+        cust_address["line2"] = string.capwords(address_split[1])
+        cust_address["city"] = string.capwords(address_split[2])
 
-        address_rest = address_split[2].split()
+        address_rest = address_split[3].split()
         cust_address["state"] = string.capwords(address_rest[0])  # TODO: validation
         try:
             cust_address["postal_code"] = int(address_rest[1].split("-")[0])
